@@ -1,0 +1,246 @@
+name: Spotify Monthly Listener Watch
+
+on:
+  schedule:
+    # 21:07-01:37 JST every 30 minutes.
+    - cron: "7,37 12-16 * * *"
+    # 02:07-08:07 JST every hour, plus a final check at 09:07 JST.
+    - cron: "7 17-23 * * *"
+    - cron: "7 0 * * *"
+  workflow_dispatch:
+    inputs:
+      test_post:
+        description: "Send a Discord connection test"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spotify-listener-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+
+      - name: Check Spotify and notify Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_POST: ${{ inputs.test_post || 'false' }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { chromium } = require('playwright');
+
+          const artists = [
+            { key: 'JO1', id: '2koP6FEfIEVk4l2Fe6jFhu' },
+            { key: 'INI', id: '73kxDUq2Hl7Upy4o0yFxXv' },
+            { key: 'JIBLUE', id: '2P3wyGoExw0CVT3P60WqWJ' },
+            { key: '新世界', id: '17Tf7xytmDacGJe4LMTTlz' },
+            { key: 'KO1KEYZ', id: '7EuQkJNmjEkhV4TdeHNFEc' },
+          ];
+
+          const initialValues = {
+            JO1: 458767,
+            INI: 332095,
+            JIBLUE: 139686,
+            '新世界': 221801,
+            KO1KEYZ: 201190,
+          };
+
+          const statePath = 'listener-state.json';
+          const state = fs.existsSync(statePath)
+            ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
+            : {
+                published: {
+                  checkedAt: '2026-09-11T00:00:00.000Z',
+                  values: initialValues,
+                },
+                candidate: null,
+                history: [],
+              };
+
+          const sameValues = (a, b) =>
+            artists.every(({ key }) => Number(a?.[key]) === Number(b?.[key]));
+
+          const number = value => Number(value).toLocaleString('en-US');
+          const signed = value => `${value >= 0 ? '+' : ''}${number(value)}`;
+
+          function tokyoParts() {
+            const parts = new Intl.DateTimeFormat('en-US', {
+              timeZone: 'Asia/Tokyo',
+              year: 'numeric',
+              month: 'numeric',
+              day: 'numeric',
+              hour: 'numeric',
+              hourCycle: 'h23',
+            }).formatToParts(new Date());
+            return Object.fromEntries(parts.map(part => [part.type, part.value]));
+          }
+
+          function discordMessage(current, previous, heading = null) {
+            const p = tokyoParts();
+            const date = `${p.month}/${p.day}`;
+            const diff = key => current[key] - previous[key];
+            const row = (label, value, delta) => {
+              const labels = {
+                JO1: 'JO1     ',
+                INI: 'INI     ',
+                JIBLUE: 'JIBLUE  ',
+                '新世界': '新世界    ',
+                KO1KEYZ: 'KO1KEYZ ',
+              };
+              return `${labels[label]} ${number(value).padStart(8)}  ${signed(delta).padStart(7)}`;
+            };
+
+            const lines = [
+              heading || date,
+              row('JO1', current.JO1, diff('JO1')),
+              row('INI', current.INI, diff('INI')),
+              `差       ${number(current.JO1 - current.INI).padStart(8)}`,
+              '',
+              row('JIBLUE', current.JIBLUE, diff('JIBLUE')),
+              row('新世界', current['新世界'], diff('新世界')),
+              row('KO1KEYZ', current.KO1KEYZ, diff('KO1KEYZ')),
+            ];
+            return `\`\`\`text\n${lines.join('\n')}\n\`\`\``;
+          }
+
+          async function sendDiscord(content) {
+            if (!process.env.DISCORD_WEBHOOK_URL) {
+              throw new Error('DISCORD_WEBHOOK_URL is not configured.');
+            }
+            const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                username: 'Spotify Listener Bot',
+                content,
+                allowed_mentions: { parse: [] },
+              }),
+            });
+            if (!response.ok) {
+              throw new Error(`Discord returned ${response.status}: ${await response.text()}`);
+            }
+          }
+
+          async function fetchListenerCount(browser, artist) {
+            let lastError;
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+              const page = await browser.newPage({
+                locale: 'en-US',
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/128 Safari/537.36',
+              });
+              try {
+                await page.goto(`https://open.spotify.com/intl-en/artist/${artist.id}`, {
+                  waitUntil: 'domcontentloaded',
+                  timeout: 60000,
+                });
+                await page.waitForTimeout(7000);
+                const body = (await page.locator('body').innerText()).replace(/\u00a0/g, ' ');
+                const match = body.match(/([\d,.]+)\s+monthly listeners/i);
+                if (!match) throw new Error('Monthly listener count was not found.');
+                return Number(match[1].replace(/[,.]/g, ''));
+              } catch (error) {
+                lastError = error;
+                await new Promise(resolve => setTimeout(resolve, attempt * 3000));
+              } finally {
+                await page.close();
+              }
+            }
+            throw new Error(`${artist.key}: ${lastError?.message || 'unknown error'}`);
+          }
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            let current;
+            try {
+              current = {};
+              for (const artist of artists) {
+                current[artist.key] = await fetchListenerCount(browser, artist);
+              }
+            } finally {
+              await browser.close();
+            }
+
+            const previous = state.published.values;
+
+            if (process.env.TEST_POST === 'true') {
+              await sendDiscord(discordMessage(current, previous, '接続テスト'));
+              console.log('Discord connection test sent.');
+              return;
+            }
+
+            if (sameValues(current, previous)) {
+              if (state.candidate) {
+                state.candidate = null;
+                fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+              }
+              console.log('No new Spotify values yet.');
+              return;
+            }
+
+            const { hour } = tokyoParts();
+            const finalMorningCheck = Number(hour) === 9;
+            const stable = state.candidate && sameValues(current, state.candidate.values);
+
+            if (!stable && !finalMorningCheck) {
+              state.candidate = {
+                firstSeenAt: new Date().toISOString(),
+                values: current,
+              };
+              fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+              console.log('New values detected; waiting for the next check to confirm them.');
+              return;
+            }
+
+            const message = discordMessage(current, previous);
+            await sendDiscord(message);
+
+            state.history.push({
+              postedAt: new Date().toISOString(),
+              values: current,
+            });
+            state.history = state.history.slice(-60);
+            state.published = {
+              checkedAt: new Date().toISOString(),
+              values: current,
+            };
+            state.candidate = null;
+            fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+            console.log('New Spotify values posted to Discord.');
+          })().catch(error => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Save listener history
+        run: |
+          if [ -f listener-state.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add listener-state.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Update Spotify listener state"
+              git push
+            fi
+          fi
