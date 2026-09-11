@@ -1,16 +1,6 @@
 {
   "published": {
-    "checkedAt": "2026-09-11T00:00:00.000Z",
-    "values": {
-      "JO1": 458767,
-      "INI": 332095,
-      "JIBLUE": 139686,
-      "新世界": 221801,
-      "KO1KEYZ": 201190
-    }
-  },
-  "candidate": {
-    "firstSeenAt": "2026-09-11T20:18:32.928Z",
+    "checkedAt": "2026-09-11T21:16:50.348Z",
     "values": {
       "JO1": 460102,
       "INI": 332460,
@@ -19,5 +9,17 @@
       "KO1KEYZ": 206005
     }
   },
-  "history": []
+  "candidate": null,
+  "history": [
+    {
+      "postedAt": "2026-09-11T21:16:50.347Z",
+      "values": {
+        "JO1": 460102,
+        "INI": 332460,
+        "JIBLUE": 138621,
+        "新世界": 220639,
+        "KO1KEYZ": 206005
+      }
+    }
+  ]
 }
