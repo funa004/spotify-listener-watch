@@ -4,9 +4,10 @@ on:
   schedule:
     # 21:07-01:37 JST every 30 minutes.
     - cron: "7,37 12-16 * * *"
-    # 02:07-08:07 JST every hour, plus a final check at 09:07 JST.
+    # 02:07-08:07 JST every hour.
     - cron: "7 17-23 * * *"
-    - cron: "7 0 * * *"
+    # 09:07-15:07 JST every hour, with the final check at 15:07 JST.
+    - cron: "7 0-6 * * *"
   workflow_dispatch:
     inputs:
       test_post:
@@ -199,10 +200,10 @@ jobs:
             }
 
             const { hour } = tokyoParts();
-            const finalMorningCheck = Number(hour) === 9;
+            const finalLateCheck = Number(hour) === 15;
             const stable = state.candidate && sameValues(current, state.candidate.values);
 
-            if (!stable && !finalMorningCheck) {
+            if (!stable && !finalLateCheck) {
               state.candidate = {
                 firstSeenAt: new Date().toISOString(),
                 values: current,
