@@ -9,7 +9,16 @@
       "KO1KEYZ": 224684
     }
   },
-  "candidate": null,
+  "candidate": {
+    "firstSeenAt": "2026-09-19T18:20:38.032Z",
+    "values": {
+      "JO1": 484638,
+      "INI": 339320,
+      "JIBLUE": 131263,
+      "新世界": 207058,
+      "KO1KEYZ": 224423
+    }
+  },
   "history": [
     {
       "postedAt": "2026-09-11T21:16:50.347Z",
