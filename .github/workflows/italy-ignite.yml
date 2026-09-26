@@ -1,0 +1,60 @@
+name: Italy IGNITE chart watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/italy-ignite.yml
+      - italy-ignite-monitor/monitor.py
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: italy-ignite-chart-watch
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install browser dependencies
+        run: |
+          python -m pip install playwright requests
+          python -m playwright install --with-deps chromium
+      - name: Check prior detection
+        id: prior
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=ignite-found" --jq '[.artifacts[] | select(.expired == false)] | length')
+          if [ "$count" -gt 0 ]; then echo 'found=true' >> "$GITHUB_OUTPUT"; else echo 'found=false' >> "$GITHUB_OUTPUT"; fi
+      - name: Capture and check both sites
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_ID: ${{ vars.DISCORD_USER_ID }}
+          IGNITE_FOUND_BEFORE: ${{ steps.prior.outputs.found }}
+        run: python italy-ignite-monitor/monitor.py
+      - name: Save every screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: italy-jpop-${{ github.run_id }}
+          path: italy-ignite-monitor/captures/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remember first detection
+        if: hashFiles('italy-ignite-monitor/ignite-found.flag') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ignite-found
+          path: italy-ignite-monitor/ignite-found.flag
+          retention-days: 7
