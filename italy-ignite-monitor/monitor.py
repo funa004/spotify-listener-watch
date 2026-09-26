@@ -101,12 +101,12 @@ def main():
         raise RuntimeError("No valid screenshots saved: " + "; ".join(errors))
     (CAPTURES / "result.json").write_text(json.dumps({"stamp": stamp, "matches": matches, "errors": errors}, ensure_ascii=False, indent=2), encoding="utf-8")
     found_now = bool(matches)
-    first_detection = found_now and not PREVIOUSLY_FOUND
+    first_detection = found_now and not (PREVIOUSLY_FOUND or (ROOT / "ignite-found.flag").exists())
     if first_detection:
-        (ROOT / "ignite-found.flag").write_text(stamp, encoding="utf-8")
         details = "、".join(f"{m['site']} {m['rank']}" for m in matches)
         send_discord(f"🚨 JO1『IGNITE』をイタリアのJ-Popランキングで検出しました！ {details}\n撮影: {stamp}", images)
-    elif PREVIOUSLY_FOUND:
+        (ROOT / "ignite-found.flag").write_text(stamp, encoding="utf-8")
+    elif PREVIOUSLY_FOUND or (ROOT / "ignite-found.flag").exists():
         send_discord(f"📸 イタリアJ-Popランキング定点撮影: {stamp}", images)
     print(json.dumps({"stamp": stamp, "images": len(images), "matches": matches, "first_detection": first_detection}, ensure_ascii=False))
 
