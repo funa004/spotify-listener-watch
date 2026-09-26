@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -29,16 +30,22 @@ def send_discord(message, images=()):
     if not WEBHOOK:
         raise RuntimeError("DISCORD_WEBHOOK_URL secret is missing")
     mention = f"<@{USER_ID}> " if USER_ID else ""
-    response = requests.post(
-        WEBHOOK,
-        json={"content": mention + message, "allowed_mentions": {"users": [USER_ID] if USER_ID else []}},
-        timeout=30,
-    )
-    response.raise_for_status()
+    def post(**kwargs):
+        for attempt in range(5):
+            response = requests.post(WEBHOOK, timeout=60, **kwargs)
+            if response.status_code == 429:
+                time.sleep(float(response.json().get("retry_after", 2)) + 0.5)
+                continue
+            if response.status_code >= 500 and attempt < 4:
+                time.sleep(attempt + 1)
+                continue
+            response.raise_for_status()
+            return
+        raise RuntimeError("Discord rate limit persisted after retries")
+
+    post(json={"content": mention + message, "allowed_mentions": {"users": [USER_ID] if USER_ID else []}})
     for image in images:
-        with image.open("rb") as handle:
-            response = requests.post(WEBHOOK, files={"files[0]": (image.name, handle, "image/png")}, timeout=60)
-        response.raise_for_status()
+        post(files={"files[0]": (image.name, image.read_bytes(), "image/png")})
 
 
 def main():
